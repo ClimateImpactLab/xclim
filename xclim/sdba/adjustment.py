@@ -388,12 +388,20 @@ class QuantileDeltaMapping(EmpiricalQuantileMapping):
     .. [Cannon2015] Cannon, A. J., Sobie, S. R., & Murdock, T. Q. (2015). Bias correction of GCM precipitation by quantile mapping: How well do methods preserve changes in quantiles and extremes? Journal of Climate, 28(17), 6938–6959. https://doi.org/10.1175/JCLI-D-14-00754.1
     """
 
-    def _adjust(self, sim, interp="nearest", extrapolation="constant"):
+    def _adjust(self, sim, interp="nearest", extrapolation="constant", year=None):
         af, _ = extrapolate_qm(self.ds.af, self.ds.hist_q, method=extrapolation)
 
-        sim_q = self.group.apply(rank, sim, main_only=True, pct=True)
-        sel = {dim: sim_q[dim] for dim in set(af.dims).intersection(set(sim_q.dims))}
-        sel["quantiles"] = sim_q
+        sim_qts = self.group.apply(rank, sim, main_only=True, pct=True)
+        if year is not None:
+            try:
+                sim_qts = sim_qts.sel(time=str(year))
+                sim = sim.sel(time=str(year))
+            except KeyError as ke:
+                # log this @@
+                print('{} is not in the time series, sending back all years'.format(year))
+        
+        sel = {dim: sim_qts[dim] for dim in set(af.dims).intersection(set(sim_qts.dims))}
+        sel["quantiles"] = sim_qts
         af = broadcast(af, sim, group=self.group, interp=interp, sel=sel)
 
         return apply_correction(sim, af, self.kind)
