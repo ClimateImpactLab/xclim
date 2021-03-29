@@ -397,8 +397,7 @@ class QuantileDeltaMapping(EmpiricalQuantileMapping):
                 sim_qts = sim_qts.sel(time=str(year))
                 sim = sim.sel(time=str(year))
             except KeyError as ke:
-                # log this @@
-                print('{} is not in the time series, sending back all years'.format(year))
+                raise KeyError("year ({}) selection must be included in input `sim` time series".format(year)) from ke
         
         sel = {dim: sim_qts[dim] for dim in set(af.dims).intersection(set(sim_qts.dims))}
         sel["quantiles"] = sim_qts
