@@ -1,21 +1,28 @@
 """Testing and tutorial utilities module."""
 # Most of this code copied and adapted from xarray
+import hashlib
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 from urllib.error import HTTPError
 from urllib.parse import urljoin
 from urllib.request import urlretrieve
 
 from xarray import Dataset
 from xarray import open_dataset as _open_dataset
-from xarray.tutorial import file_md5_checksum
 
 _default_cache_dir = Path.home() / ".xclim_testing_data"
 
 LOGGER = logging.getLogger("xclim")
 
-__all__ = ["open_dataset"]
+__all__ = ["open_dataset", "list_input_variables"]
+
+
+def file_md5_checksum(fname):
+    hash_md5 = hashlib.md5()
+    with open(fname, "rb") as f:
+        hash_md5.update(f.read())
+    return hash_md5.hexdigest()
 
 
 def _get(
@@ -206,3 +213,55 @@ class TestDataSet:  # noqa: D101
 
     def __call__(self):  # noqa: D102
         return [f() for f in self.files]
+
+
+def list_input_variables(
+    submodules: Sequence[str] = None, realms: Sequence[str] = None
+) -> dict:
+    """List all possible variables names used in xclim's indicators.
+
+    Made for development purposes. Parses all indicator parameters with the
+    :py:attribute:`xclim.core.utils.InputKind.VARIABLE` or `OPTIONAL_VARIABLE` kinds.
+
+    Parameters
+    ----------
+    realm: Sequence of str, optional
+      Restrict the output to indicators of a list of realms only. Default None, which parses all indicators.
+    submodule: str, optional
+      Restrict the output to indicators of a list of submodules only. Default None, which parses all indicators.
+
+    Returns
+    -------
+    dict
+      A mapping from variable name to indicator class.
+    """
+    from collections import defaultdict
+
+    from xclim import indicators
+    from xclim.core.indicator import registry
+    from xclim.core.utils import InputKind
+
+    submodules = submodules or [
+        sub for sub in dir(indicators) if not sub.startswith("__")
+    ]
+    realms = realms or ["atmos", "ocean", "land", "seaIce"]
+
+    variables = defaultdict(list)
+    for name, ind in registry.items():
+        if "." in name:
+            # external submodule, sub module name is prepened to registry key
+            if name.split(".")[0] not in submodules:
+                continue
+        elif ind.realm not in submodules:
+            # official indicator : realm == submodule
+            continue
+        if ind.realm not in realms:
+            continue
+
+        # ok we want this one.
+        for varname, meta in ind.parameters.items():
+            if meta["kind"] in [InputKind.VARIABLE, InputKind.OPTIONAL_VARIABLE]:
+                var = meta.get("default") or varname
+                variables[var].append(ind)
+
+    return variables

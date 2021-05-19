@@ -1,4 +1,5 @@
 """Atmospheric conversion definitions."""
+from inspect import _empty
 
 from xclim import indices
 from xclim.core.indicator import Indicator
@@ -43,7 +44,8 @@ wind_speed_from_vector = Converter(
     standard_name=["wind_speed", "wind_from_direction"],
     description=[
         "Wind speed computed as the magnitude of the (uas, vas) vector.",
-        "Wind direction computed as the angle of the (uas, vas) vector. A direction of 0° is attributed to winds with a speed under {calm_wind_thresh}.",
+        "Wind direction computed as the angle of the (uas, vas) vector."
+        " A direction of 0° is attributed to winds with a speed under {calm_wind_thresh}.",
     ],
     long_name=["Near-Surface Wind Speed", "Near-Surface Wind from Direction"],
     cell_methods="",
@@ -104,6 +106,7 @@ relative_humidity_from_dewpoint = Converter(
     ),
     compute=wrapped_partial(
         indices.relative_humidity,
+        suggested={"dtas": _empty},
         huss=None,
         ps=None,
         invalid_values="mask",

@@ -25,7 +25,7 @@ The climate indices chosen to compute the spatial analogues are usually annual v
 indices relevant to the intended audience of these maps. For example, in the case of the
 wine grape industry, the climate indices examined could include the length of the frost-free
 season, growing degree-days, annual winter minimum temperature andand annual number of
-very cold days [Roy2017].
+very cold days [Roy2017]_.
 
 
 Methods to compute the (dis)similarity between samples
@@ -63,6 +63,8 @@ from typing import Sequence, Union
 import numpy as np
 import xarray as xr
 from boltons.funcutils import wraps
+from pkg_resources import parse_version
+from scipy import __version__ as __scipy_version__
 from scipy import spatial
 from scipy.spatial import cKDTree as KDTree
 
@@ -107,6 +109,12 @@ def spatial_analogs(
     xr.DataArray
         The dissimilarity statistic over the union of candidates' and target's dimensions.
     """
+    if parse_version(__scipy_version__) < parse_version("1.6.0") and method in [
+        "kldiv",
+        "nearest_neighbor",
+    ]:
+        raise RuntimeError(f"Spatial analog method ({method}) requires scipy>=1.6.0.")
+
     if isinstance(dist_dim, str):
         dist_dim = [dist_dim]
 
@@ -276,7 +284,7 @@ def nearest_neighbor(x, y):
     # Pool the samples and find the nearest neighbours
     xy = np.vstack([x, y])
     tree = KDTree(xy)
-    _, ind = tree.query(xy, k=2, eps=0, p=2, n_jobs=2)
+    _, ind = tree.query(xy, k=2, eps=0, p=2, workers=2)
 
     # Identify points whose neighbors are from the same sample
     same = ~np.logical_xor(*(ind < nx).T)
@@ -538,8 +546,8 @@ def kldiv(x, y, *, k=1):
     # Get the k'th nearest neighbour from each points in x for both x and y.
     # We get the values for K + 1 to make sure the output is a 2D array.
     kmax = max(ka) + 1
-    r, _ = xtree.query(x, k=kmax, eps=0, p=2, n_jobs=2)
-    s, _ = ytree.query(x, k=kmax, eps=0, p=2, n_jobs=2)
+    r, _ = xtree.query(x, k=kmax, eps=0, p=2, workers=2)
+    s, _ = ytree.query(x, k=kmax, eps=0, p=2, workers=2)
 
     # There is a mistake in the paper. In Eq. 14, the right side misses a
     # negative sign on the first term of the right hand side.

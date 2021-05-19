@@ -215,7 +215,7 @@ def per_doy():
 
 @pytest.fixture
 def areacella():
-    """Return a rectangular grid of grid cell area. """
+    """Return a rectangular grid of grid cell area."""
     r = 6100000
     lon_bnds = np.arange(-180, 181, 1)
     lat_bnds = np.arange(-90, 91, 1)
@@ -269,7 +269,7 @@ def ws_series():
             dims="time",
             name="ws",
             attrs={
-                "standard_name": "wind speed",
+                "standard_name": "wind_speed",
                 "units": "km h-1",
             },
         )
@@ -293,6 +293,42 @@ def huss_series():
         )
 
     return _huss_series
+
+
+@pytest.fixture
+def snd_series():
+    def _snd_series(values, start="7/1/2000"):
+        coords = pd.date_range(start, periods=len(values), freq=pd.DateOffset(days=1))
+        return xr.DataArray(
+            values,
+            coords=[coords],
+            dims="time",
+            name="snd",
+            attrs={
+                "standard_name": "surface_snow_thickness",
+                "units": "m",
+            },
+        )
+
+    return _snd_series
+
+
+@pytest.fixture
+def swe_series():
+    def _swe_series(values, start="7/1/2000"):
+        coords = pd.date_range(start, periods=len(values), freq=pd.DateOffset(days=1))
+        return xr.DataArray(
+            values,
+            coords=[coords],
+            dims="time",
+            name="swe",
+            attrs={
+                "standard_name": "liquid_water_content_of_surface_snow",
+                "units": "kg/m2",
+            },
+        )
+
+    return _swe_series
 
 
 @pytest.fixture
@@ -380,7 +416,7 @@ def add_example_dataarray(xdoctest_namespace, tas_series):
 def is_matplotlib_installed(xdoctest_namespace):
     def _is_matplotlib_installed():
         try:
-            import matplotlib
+            import matplotlib  # noqa
 
             return
         except ImportError:
@@ -392,11 +428,55 @@ def is_matplotlib_installed(xdoctest_namespace):
 
 @pytest.fixture
 def official_indicators():
-    # Remove unofficial indicators (as those created during the tests)
+    # Remove unofficial indicators (as those created during the tests, and those from YAML-built modules)
     registry_cp = xclim.core.indicator.registry.copy()
-    for identifier, cls in xclim.core.indicator.registry.items():
-        if not cls.__module__.startswith("xclim") or cls.__module__.startswith(
-            "xclim.testing"
-        ):
-            registry_cp.pop(identifier)
+    for cls in xclim.core.indicator.registry.values():
+        if cls.identifier.upper() != cls._registry_id:
+            registry_cp.pop(cls._registry_id)
     return registry_cp
+
+
+@pytest.fixture(scope="session")
+def atmosds():
+    ds = xclim.testing.open_dataset("ERA5/daily_surface_cancities_1990-1993.nc")
+
+    sfcWind, sfcWindfromdir = xclim.atmos.wind_speed_from_vector(ds=ds)
+    sfcWind.attrs.update(cell_methods="time: mean within days")
+    huss = xclim.atmos.specific_humidity(ds=ds)
+    hurs = ds.rh
+    snw = ds.swe * 1000
+    # Liquid water equivalent snow thickness [m] to snow thickness in [m] : lwe [m] * 1000 kg/m³ / 300 kg/m³
+    snd = snw / 300
+    snw.attrs.update(
+        standard_name="surface_snow_amount",
+        units="kg m-2",
+        cell_methods="time: mean within days",
+    )
+    snd.attrs.update(
+        standard_name="surface_snow_thickness",
+        units="m",
+        cell_methods="time: mean within days",
+    )
+
+    psl = ds.ps
+    psl.attrs.update(standard_name="air_pressure_at_sea_level")
+
+    tn10 = xclim.core.calendar.percentile_doy(ds.tasmin, per=10)
+    t10 = xclim.core.calendar.percentile_doy(ds.tas, per=10)
+    t90 = xclim.core.calendar.percentile_doy(ds.tas, per=90)
+    tx90 = xclim.core.calendar.percentile_doy(ds.tasmax, per=90)
+
+    ds = ds.assign(
+        sfcWind=sfcWind,
+        sfcWindfromdir=sfcWindfromdir,
+        huss=huss,
+        hurs=hurs,
+        psl=psl,
+        snw=snw,
+        snd=snd,
+        tn10=tn10,
+        t10=t10,
+        t90=t90,
+        tx90=tx90,
+    )
+    return ds

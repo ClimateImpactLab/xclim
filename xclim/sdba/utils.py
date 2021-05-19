@@ -6,9 +6,10 @@ import bottleneck as bn
 import numpy as np
 import xarray as xr
 from boltons.funcutils import wraps
+from dask import array as dsk
 from scipy.interpolate import griddata, interp1d
 
-from xclim.core.calendar import _interpolate_doy_calendar
+from xclim.core.calendar import _interpolate_doy_calendar  # noqa
 from xclim.core.utils import ensure_chunk_size
 
 from .base import Grouper, parse_group
@@ -169,7 +170,7 @@ def invert(x: xr.DataArray, kind: Optional[str] = None):
         if kind == ADDITIVE:
             return -x
         if kind == MULTIPLICATIVE:
-            return 1 / x
+            return 1 / x  # type: ignore
         raise ValueError
 
 
@@ -214,7 +215,8 @@ def broadcast(
             if interp == "cubic" and len(sel.keys()) > 1:
                 interp = "linear"
                 warn(
-                    "Broadcasting operations in multiple dimensions can only be done with linear and nearest-neighbor interpolation, not cubic. Using linear."
+                    "Broadcasting operations in multiple dimensions can only be done with linear and nearest-neighbor"
+                    " interpolation, not cubic. Using linear."
                 )
 
             grouped = grouped.interp(sel, method=interp)
@@ -417,7 +419,7 @@ def interp_on_quantiles(
             output_core_dims=[[dim]],
             vectorize=True,
             dask="parallelized",
-            output_dtypes=[np.float],
+            output_dtypes=[float],
         )
     # else:
 
@@ -505,3 +507,203 @@ def rank(da, dim="time", pct=False):
         dask="parallelized",
         output_dtypes=[da.dtype],
     )
+
+
+def pc_matrix(arr: Union[np.ndarray, dsk.Array]):
+    """Construct a Principal Component matrix.
+
+    This matrix can be used to transform points in arr to principal components
+    coordinates. Note that this function does not manage NaNs; if a single observation is null, all elements
+    of the transformation matrix involving that variable will be NaN.
+
+    Parameters
+    ----------
+    arr : Union[numpy.ndarray, dask.array.Array]
+      2D array (M, N) of the M coordinates of N points.
+
+    Returns
+    -------
+    A
+      MxM Array of the same type as arr.
+    """
+    # Get appropriate math module
+    mod = dsk if isinstance(arr, dsk.Array) else np
+
+    # Covariance matrix
+    cov = mod.cov(arr)
+
+    # Get eigenvalues and eigenvectors
+    # There are no such method yet in dask, but we are lucky:
+    # the SVD decomposition of a symmetric matrix gives the eigen stuff.
+    # And covariance matrices are by definition symmetric!
+    # Numpy has a hermitian=True option to accelerate, but not dask...
+    kwargs = {} if mod is dsk else {"hermitian": True}
+    eig_vec, eig_vals, _ = mod.linalg.svd(cov, **kwargs)
+
+    # The PC matrix is the eigen vectors matrix scaled by the square root of the eigen values
+    return eig_vec * mod.sqrt(eig_vals)
+
+
+def best_pc_orientation(A, Binv, val=1000):
+    """Return best orientation vector for A.
+
+    Eigenvectors returned by `pc_matrix` do not have a defined orientation.
+    Given an inverse transform Binv and a transform A, this returns the orientation
+    minimizing the projected distance for a test point far from the origin.
+
+    This trick is explained in [hnilica2017]_. See documentation of
+    `sdba.adjustment.PrincipalComponentAdjustment`.
+
+    Parameters
+    ----------
+    A : numpy.ndarray
+      MxM Matrix defining the final transformation.
+    Binv : numpy.ndarray
+      MxM Matrix defining the (inverse) first transformation.
+    val : float
+      The coordinate of the test point (same for all axes). It should be much
+      greater than the largest furthest point in the array used to define B.
+
+    Returns
+    -------
+    orient :
+      Mx1 vector of orientation correction (1 or -1).
+    """
+    m = A.shape[0]
+    orient = np.ones(m)
+    P = np.diag(val * np.ones(m))
+
+    # Compute first reference error
+    err = np.linalg.norm(P - A @ Binv @ P)
+    for i in range(m):
+        # Switch the ith axis orientation
+        orient[i] = -1
+        # Compute new error
+        new_err = np.linalg.norm(P - (A * orient) @ Binv @ P)
+        if new_err > err:
+            # Previous error was lower, switch back
+            orient[i] = 1
+        else:
+            # New orientation is better, keep and remember error.
+            err = new_err
+    return orient
+
+
+def get_clusters_1d(data: np.ndarray, u1: float, u2: float):
+    """Get clusters of a 1D array.
+
+    A cluster is defined as a sequence of values larger than u2 with at least one value larger than u1.
+
+    Parameters
+    ----------
+    data: 1D ndarray
+      Values to get clusters from.
+    u1 : float
+      Extreme value threshold, at least one value in the cluster must exceed this.
+    u2 : float
+      Cluster threshold, values above this can be part of a cluster.
+
+    Reference
+    ---------
+    `getcluster` of Extremes.jl (read on 2021-04-20) https://github.com/jojal5/Extremes.jl
+    """
+    # Boolean array, True where data is over u2
+    # We pad with values under u2, so that clusters never start or end at boundaries.
+    exce = np.concatenate(([u2 - 1], data, [u2 - 1])) > u2
+
+    # 1 just before the start of the cluster
+    # -1 on the last element of the cluster
+    bounds = np.diff(exce.astype(np.int32))
+    # We add 1 to get the first element and sub 1 to get the same index as in data
+    starts = np.where(bounds == 1)[0]
+    # We sub 1 to get the same index as in data and add 1 to get the element after (for python slicing)
+    ends = np.where(bounds == -1)[0]
+
+    cl_maxpos = []
+    cl_maxval = []
+    cl_start = []
+    cl_end = []
+    for start, end in zip(starts, ends):
+        cluster_max = data[start:end].max()
+        if cluster_max > u1:
+            cl_maxval.append(cluster_max)
+            cl_maxpos.append(start + np.argmax(data[start:end]))
+            cl_start.append(start)
+            cl_end.append(end - 1)
+
+    return (
+        np.array(cl_start),
+        np.array(cl_end),
+        np.array(cl_maxpos),
+        np.array(cl_maxval),
+    )
+
+
+def get_clusters(data: xr.DataArray, u1, u2, dim: str = "time"):
+    """Get cluster count, maximum and position along a given dim.
+
+    See `get_clusters_1d`. Used by `adjustment.ExtremeValues`.
+
+    Returns
+    -------
+    xr.Dataset
+      With variables,
+        - `nclusters` : Number of clusters for each point (with `dim` reduced), int
+        - `start` : First index in the cluster (`dim` reduced, new `cluster`), int
+        - `end` : Last index in the cluster, inclusive (`dim` reduced, new `cluster`), int
+        - `maxpos` : Index of the maximal value within the cluster (`dim` reduced, new `cluster`), int
+        - `maximum` : Maximal value within the cluster (`dim` reduced, new `cluster`), same dtype as data.
+
+      For `start`, `end` and `maxpos`, -1 means NaN and should always correspond to a `NaN` in `maximum`.
+      The length along `cluster` is half the size of "dim", the maximal theoritical number of clusters.
+    """
+
+    def _get_clusters(arr, u1, u2, N):
+        st, ed, mp, mv = get_clusters_1d(arr, u1, u2)
+        count = len(st)
+        pad = [-1] * (N - count)
+        return (
+            np.append(st, pad),
+            np.append(ed, pad),
+            np.append(mp, pad),
+            np.append(mv, [np.NaN] * (N - count)),
+            count,
+        )
+
+    # The largest possible number of clusters. Ex: odd positions are < u2, even positions are > u1.
+    N = data[dim].size // 2
+
+    starts, ends, maxpos, maxval, nclusters = xr.apply_ufunc(
+        _get_clusters,
+        data,
+        u1,
+        u2,
+        input_core_dims=[[dim], [], []],
+        output_core_dims=[["cluster"], ["cluster"], ["cluster"], ["cluster"], []],
+        kwargs={"N": N},
+        output_dtypes=[int, int, int, data.dtype, int],
+        dask="parallelized",
+        vectorize=True,
+        dask_gufunc_kwargs={
+            "meta": (
+                np.array((), dtype=int),
+                np.array((), dtype=int),
+                np.array((), dtype=int),
+                np.array((), dtype=data.dtype),
+                np.array((), dtype=int),
+            ),
+            "output_sizes": {"cluster": N},
+        },
+    )
+
+    ds = xr.Dataset(
+        {
+            "start": starts,
+            "end": ends,
+            "maxpos": maxpos,
+            "maximum": maxval,
+            "nclusters": nclusters,
+        }
+    )
+
+    return ds

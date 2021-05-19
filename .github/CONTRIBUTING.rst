@@ -95,7 +95,7 @@ Ready to contribute? Here's how to set up `xclim` for local development.
     # For Anaconda/Miniconda environments:
     $ conda install -c conda-forge black pytest pydocstyle xdoctest tox
 
-    $ black --check --target-version py36 xclim tests
+    $ black --check --target-version py37 xclim tests
     $ flake8 xclim tests
     $ pytest --nbval docs/notebooks
     $ pytest --root-dir xclim/testing/tests/ --xdoctest xclim
@@ -150,7 +150,7 @@ Before you submit a pull request, please follow these guidelines:
    * `numpydoc`_
    * `reStructuredText (ReST)`_
 
-5. The pull request should work for Python 3.6, 3.7, 3.8, and 3.9 as well as raise test coverage.
+5. The pull request should work for Python 3.7, 3.8, and 3.9 as well as raise test coverage.
    Pull requests are also checked for documentation build status and for `PEP8`_ compliance.
 
    The build statuses and build errors for pull requests can be found at:

@@ -36,13 +36,13 @@ class TestRLE:
             da = da.chunk({"a": 1, "b": 2})
 
         out = rl.rle(da != 0).mean(["a", "b", "c"])
-        expected = np.zeros(366)
+        expected = np.zeros(365)
         expected[1] = 10
-        expected[2:12] = np.nan
+        expected[2:11] = np.nan
         np.testing.assert_array_equal(out, expected)
 
 
-class TestLongestRun:
+class TestStatisticsRun:
     nc_pr = os.path.join("NRCANdaily", "nrcan_canada_daily_pr_1990.nc")
 
     def test_simple(self):
@@ -52,13 +52,13 @@ class TestLongestRun:
         )
         values[1:11] = 1
         da = xr.DataArray(values != 0, coords={"time": time}, dims="time")
-        lt = da.resample(time="M").map(rl.longest_run_ufunc)
+        lt = da.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         assert lt[0] == 10
         np.testing.assert_array_equal(lt[1:], 0)
 
         # n-dim version versus ufunc
         da3d = open_dataset(self.nc_pr).pr[:, 40:50, 50:68] != 0
-        lt_orig = da3d.resample(time="M").map(rl.longest_run_ufunc)
+        lt_orig = da3d.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         # override 'auto' usage of ufunc for small number of gridpoints
         lt_Ndim = da3d.resample(time="M").map(
             rl.longest_run, dim="time", ufunc_1dim=False
@@ -72,7 +72,7 @@ class TestLongestRun:
         )
         values[0:10] = 1
         da = xr.DataArray(values != 0, coords={"time": time}, dims="time")
-        lt = da.resample(time="M").map(rl.longest_run_ufunc)
+        lt = da.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         assert lt[0] == 10
         np.testing.assert_array_equal(lt[1:], 0)
 
@@ -80,7 +80,7 @@ class TestLongestRun:
         da3d = open_dataset(self.nc_pr).pr[:, 40:50, 50:68] * 0
         da3d[0:10] = da3d[0:10] + 1
         da3d = da3d == 1
-        lt_orig = da3d.resample(time="M").map(rl.longest_run_ufunc)
+        lt_orig = da3d.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         # override 'auto' usage of ufunc for small number of gridpoints
         lt_Ndim = da3d.resample(time="M").map(
             rl.longest_run, dim="time", ufunc_1dim=False
@@ -95,7 +95,7 @@ class TestLongestRun:
         values[-10:] = 1
         da = xr.DataArray(values != 0, coords={"time": time}, dims="time")
 
-        lt = da.resample(time="M").map(rl.longest_run_ufunc)
+        lt = da.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         assert lt[-1] == 10
         np.testing.assert_array_equal(lt[:-1], 0)
 
@@ -103,7 +103,7 @@ class TestLongestRun:
         da3d = open_dataset(self.nc_pr).pr[:, 40:50, 50:68] * 0
         da3d[-10:] = da3d[-10:] + 1
         da3d = da3d == 1
-        lt_orig = da3d.resample(time="M").map(rl.longest_run_ufunc)
+        lt_orig = da3d.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         lt_Ndim = da3d.resample(time="M").map(
             rl.longest_run, dim="time", ufunc_1dim=False
         )
@@ -116,13 +116,13 @@ class TestLongestRun:
         )
         da = xr.DataArray(values != 0, coords={"time": time}, dims="time")
 
-        lt = da.resample(time="M").map(rl.longest_run_ufunc)
+        lt = da.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         np.testing.assert_array_equal(lt, da.resample(time="M").count(dim="time"))
 
         # n-dim version versus ufunc
         da3d = open_dataset(self.nc_pr).pr[:, 40:50, 50:68] * 0 + 1
         da3d = da3d == 1
-        lt_orig = da3d.resample(time="M").map(rl.longest_run_ufunc)
+        lt_orig = da3d.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         lt_Ndim = da3d.resample(time="M").map(
             rl.longest_run, dim="time", ufunc_1dim=False
         )
@@ -136,7 +136,7 @@ class TestLongestRun:
         )
         da = xr.DataArray(values != 0, coords={"time": time}, dims="time")
 
-        lt = da.resample(time="M").map(rl.longest_run_ufunc)
+        lt = da.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         n = da.resample(time="M").count(dim="time")
         np.testing.assert_array_equal(lt[0], n[0])
         np.testing.assert_array_equal(lt[1], 26)
@@ -145,11 +145,35 @@ class TestLongestRun:
         da3d = open_dataset(self.nc_pr).pr[:, 40:50, 50:68] * 0 + 1
         da3d[35] = da3d[35] + 1
         da3d = da3d == 1
-        lt_orig = da3d.resample(time="M").map(rl.longest_run_ufunc)
+        lt_orig = da3d.resample(time="M").map(rl.statistics_run_ufunc, reducer="max")
         lt_Ndim = da3d.resample(time="M").map(
             rl.longest_run, dim="time", ufunc_1dim=False
         )
         np.testing.assert_array_equal(lt_orig, lt_Ndim)
+
+    @pytest.mark.parametrize("ufunc_1dim", [True, False])
+    def test_other_stats(self, ufunc_1dim):
+        values = np.ones(365)
+        values[35] = 0
+        time = pd.date_range(
+            "1/1/2000", periods=len(values), freq=pd.DateOffset(days=1)
+        )
+        da = xr.DataArray(values != 0, coords={"time": time}, dims="time")
+
+        lt = da.resample(time="YS").map(
+            rl.rle_statistics, reducer="min", ufunc_1dim=ufunc_1dim
+        )
+        assert lt == 35
+
+        lt = da.resample(time="YS").map(
+            rl.rle_statistics, reducer="mean", ufunc_1dim=ufunc_1dim
+        )
+        assert lt == 182
+
+        lt = da.resample(time="YS").map(
+            rl.rle_statistics, reducer="std", ufunc_1dim=ufunc_1dim
+        )
+        assert lt == 147
 
 
 class TestFirstRun:
@@ -245,6 +269,54 @@ class TestLastRun:
 
         out = rl.last_run(runs, window=1, dim="time", coord=coord, ufunc_1dim=use_1dim)
         np.testing.assert_array_equal(out.load(), expected)
+
+
+def test_run_bounds_synthetic():
+    run = xr.DataArray(
+        [0, 1, 1, 1, 0, 0, 1, 1, 1, 0], dims="x", coords={"x": np.arange(10) ** 2}
+    )
+    bounds = rl.run_bounds(run, "x", coord=True)
+    np.testing.assert_array_equal(bounds, [[1, 36], [16, 81]])
+
+    bounds = rl.run_bounds(run, "x", coord=False)
+    np.testing.assert_array_equal(bounds, [[1, 6], [4, 9]])
+
+
+def test_run_bounds_data():
+    era5 = open_dataset("ERA5/daily_surface_cancities_1990-1993.nc")
+    cond = era5.tas.rolling(time=7).mean() > 285
+
+    bounds = rl.run_bounds(cond, "time")  # def coord = True
+    np.testing.assert_array_equal(
+        bounds.isel(location=0, events=0),
+        pd.to_datetime(["1990-06-19", "1990-10-26"]).values,
+    )
+
+    bounds = rl.run_bounds(cond, "time", coord="dayofyear")
+    np.testing.assert_array_equal(bounds.isel(location=1, events=4), [279, 283])
+    assert bounds.events.size == 15
+
+
+def test_keep_longest_run_synthetic():
+    runs = xr.DataArray([0, 1, 1, 1, 0, 0, 1, 1, 1, 0], dims="x").astype(bool)
+    lrun = rl.keep_longest_run(runs, "x")
+    np.testing.assert_array_equal(
+        lrun, np.array([0, 1, 1, 1, 0, 0, 0, 0, 0, 0], dtype=bool)
+    )
+
+
+def test_keep_longest_run_data():
+    era5 = open_dataset("ERA5/daily_surface_cancities_1990-1993.nc")
+    cond = era5.swe > 0.001
+    lrun = rl.keep_longest_run(cond, "time")
+    np.testing.assert_array_equal(
+        lrun.isel(time=slice(651, 658), location=2),
+        np.array([0, 0, 0, 1, 1, 1, 1], dtype=bool),
+    )
+
+    xr.testing.assert_equal(
+        rl.keep_longest_run(cond, "time").sum("time"), rl.longest_run(cond, "time")
+    )
 
 
 class TestRunsWithDates:
@@ -442,3 +514,20 @@ def test_lazy_indexing_special_cases(use_dask):
     c = xr.DataArray([1], dims=("x",)).chunk()[0]
     b["z"] = np.arange(b.z.size)
     rl.lazy_indexing(b, c)
+
+
+@pytest.mark.parametrize("use_dask", [True, False])
+def test_season(use_dask, tas_series):
+    t = np.zeros(360)
+    t[140:150] = 1
+    tas = tas_series(t, start="2000-01-01")
+    runs = xr.concat((tas, tas), dim="dim0")
+    runs = runs >= 1
+
+    if use_dask:
+        runs = runs.chunk({"time": 10, "dim0": 1})
+
+    out = rl.season(runs, window=2)
+    np.testing.assert_array_equal(out.start.load(), [140, 140])
+    np.testing.assert_array_equal(out.end.load(), [150, 150])
+    np.testing.assert_array_equal(out.length.load(), [10, 10])

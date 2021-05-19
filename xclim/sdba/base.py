@@ -1,8 +1,9 @@
 """Base classes."""
 from inspect import signature
 from types import FunctionType
-from typing import Callable, Mapping, Optional, Sequence, Union
+from typing import Callable, Mapping, Optional, Sequence, Set, Union
 
+import jsonpickle
 import numpy as np
 import xarray as xr
 from boltons.funcutils import wraps
@@ -12,9 +13,23 @@ from boltons.funcutils import wraps
 class Parametrizable(dict):
     """Helper base class resembling a dictionary.
 
-    Only parameters passed in the init or set using item access "[ ]" are considered as such and returned in the
-    :py:meth:`Parametrizable.parameters` dictionary, the copy method and the class representation.
+    This object is _completely_ defined by the content of its internal dictionary, accessible through item access
+    (`self['attr']`) or in `self.parameters`. When serializing and restoring this object, only members of that internal
+    dict are preserved. All other attributes set directly with `self.attr = value` will not be preserved upon serialization
+    and restoration of the object with `[json]pickle`.
+    dictionary. Other variables set with `self.var = data` will be lost in the serialization process.
+    This class is best serialized and restored with `jsonpickle`.
     """
+
+    _repr_hide_params = []
+
+    def __getstate__(self):
+        """For (json)pickle, a Parametrizable should be defined by its internal dict only."""
+        return self.parameters
+
+    def __setstate__(self, state):
+        """For (json)pickle, a Parametrizable in only defined by its internal dict."""
+        self.update(state)
 
     def __getattr__(self, attr):
         """Get attributes."""
@@ -29,24 +44,54 @@ class Parametrizable(dict):
         """All parameters as a dictionary."""
         return dict(**self)
 
-    def copy(self):
-        """Return a copy of this instance."""
-        return self.__class__(**self.parameters)
-
     def __repr__(self):
         """Return a string representation that allows eval to recreate it."""
-        params = ", ".join([f"{k}={repr(v)}" for k, v in self.items()])
+        params = ", ".join(
+            [
+                f"{k}={repr(v)}"
+                for k, v in self.items()
+                if k not in self._repr_hide_params
+            ]
+        )
         return f"{self.__class__.__name__}({params})"
+
+
+class ParametrizableWithDataset(Parametrizable):
+    """Parametrizeable class that also has a `ds` attribute storing a dataset."""
+
+    _attribute = "_xclim_parameters"
+
+    @classmethod
+    def from_dataset(cls, ds: xr.Dataset):
+        """Create an instance from a dataset.
+
+        The dataset must have a global attribute with a name corresponding to `cls._attribute`,
+        and that attribute must be the result of `jsonpickle.encode(object)` where object is
+        of the same type as this object.
+        """
+        obj = jsonpickle.decode(ds.attrs[cls._attribute])
+        obj.set_dataset(ds)
+        return obj
+
+    def set_dataset(self, ds: xr.Dataset):
+        """Stores an xarray dataset in the `ds` attribute.
+
+        Useful with custom object initialization or if some external processing was performed.
+        """
+        self.ds = ds
+        self.ds.attrs[self._attribute] = jsonpickle.encode(self)
 
 
 class Grouper(Parametrizable):
     """Helper object to perform grouping actions on DataArrays and Datasets."""
 
+    _repr_hide_params = ["dim", "prop"]  # For a concise repr
+
     def __init__(
         self,
         group: str,
         window: int = 1,
-        add_dims: Optional[Sequence[str]] = None,
+        add_dims: Optional[Union[Sequence[str], Set[str]]] = None,
         interp: Union[bool, str] = False,
     ):
         """Create the Grouper object.
@@ -125,6 +170,9 @@ class Grouper(Parametrizable):
             da = da.rolling(center=True, **{self.dim: self.window}).construct(
                 window_dim="window"
             )
+            if da.chunks is not None:
+                # Rechunk. There might be padding chunks.
+                da = da.chunk({self.dim: -1})
 
         if self.prop is None and self.dim == "time":
             group = self.get_index(da)

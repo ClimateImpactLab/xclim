@@ -24,7 +24,9 @@ __all__ = [
     "fire_weather_indexes",
     "last_snowfall",
     "first_snowfall",
+    "days_with_snow",
     "days_over_precip_thresh",
+    "high_precip_low_temp",
     "fraction_over_precip_thresh",
     "liquid_precip_ratio",
 ]
@@ -197,7 +199,7 @@ liquid_precip_accumulation = PrTasx(
     units="mm",
     standard_name="lwe_thickness_of_liquid_precipitation_amount",
     long_name="Total liquid precipitation",
-    description="{freq} total liquid precipitation, estimated as precipitation when temperature >= {thresh}",
+    description="{freq} total {phase} precipitation, estimated as precipitation when temperature >= {thresh}",
     cell_methods="time: sum within days time: sum over days",
     compute=wrapped_partial(
         indices.precip_accumulation, suggested={"tas": _empty}, phase="liquid"
@@ -222,12 +224,13 @@ drought_code = PrTas(
     units="",
     standard_name="drought_code",
     long_name="Drought Code",
-    description="Numeric rating of the average moisture content of organic layers. Computed with start up method {start_up_mode}",
+    description="Numeric rating of the average moisture content of organic layers.",
     compute=indices.drought_code,
     missing="skip",
 )
 
 fire_weather_indexes = Daily(
+    module="atmos",  # Hack because we aren't using a class defined within xclim.indicators.atmos.
     nvar=4,
     identifier="fwi",
     realm="atmos",
@@ -249,9 +252,9 @@ fire_weather_indexes = Daily(
         "Fire Weather Index",
     ],
     description=[
-        "Numeric rating of the average moisture content of deep, compact organic layers. Computed with start up method {start_up_mode}",
-        "Numeric rating of the average moisture content of loosely compacted organic layers of moderate depth. Computed with start up method {start_up_mode}",
-        "Numeric rating of the average moisture content of litter and other cured fine fuels. Computed with start up method {start_up_mode}",
+        "Numeric rating of the average moisture content of deep, compact organic layers.",
+        "Numeric rating of the average moisture content of loosely compacted organic layers of moderate depth.",
+        "Numeric rating of the average moisture content of litter and other cured fine fuels.",
         "Numeric rating of the expected rate of fire spread.",
         "Numeric rating of the total amount of fuel available for combustion.",
         "Numeric rating of fire intensity.",
@@ -280,20 +283,39 @@ first_snowfall = Prsn(
     compute=indices.first_snowfall,
 )
 
+days_with_snow = Prsn(
+    identifier="days_with_snow",
+    title="Days with snowfall",
+    long_name="Number of days with solid precipitation flux between low and high thresholds.",
+    description="{freq} number of days with solid precipitation flux larger than {low} and smaller or equal to {high}.",
+    units="days",
+    compute=indices.days_with_snow,
+)
 
 days_over_precip_thresh = Pr(
     identifier="days_over_precip_thresh",
     standard_name="number_of_days_with_lwe_thickness_of_precipitation_amount_above_threshold",
-    description="{freq} number of days with precipitation above a daily percentile. Only days with at least {thresh} are counted.",
+    description="{freq} number of days with precipitation above a daily percentile."
+    " Only days with at least {thresh} are counted.",
     units="days",
     cell_methods="time: sum over days",
     compute=indices.days_over_precip_thresh,
 )
 
 
+high_precip_low_temp = PrTasx(
+    identifier="high_precip_low_temp",
+    description="{freq} number of days with precipitation above {pr_thresh} and temperature below {tas_thresh}.",
+    units="days",
+    cell_methods="time: sum over days",
+    compute=indices.high_precip_low_temp,
+)
+
+
 fraction_over_precip_thresh = Pr(
     identifier="fraction_over_precip_thresh",
-    description="{freq} fraction of total precipitation due to days with precipitation above a daily percentile. Only days with at least {thresh} are included in the total.",
+    description="{freq} fraction of total precipitation due to days with precipitation above a daily percentile."
+    " Only days with at least {thresh} are included in the total.",
     units="",
     cell_methods="",
     compute=indices.fraction_over_precip_thresh,
@@ -302,8 +324,10 @@ fraction_over_precip_thresh = Pr(
 
 liquid_precip_ratio = PrTasx(
     identifier="liquid_precip_ratio",
-    description="{freq} ratio of rainfall to total precipitation. Rainfall is estimated as precipitation on days where temperature is above {thresh}.",
-    abstract="The ratio of total liquid precipitation over the total precipitation. Liquid precipitation is approximated from total precipitation on days where temperature is above a threshold.",
+    description="{freq} ratio of rainfall to total precipitation."
+    " Rainfall is estimated as precipitation on days where temperature is above {thresh}.",
+    abstract="The ratio of total liquid precipitation over the total precipitation. Liquid precipitation is"
+    " approximated from total precipitation on days where temperature is above a threshold.",
     units="",
     compute=wrapped_partial(
         indices.liquid_precip_ratio, suggested={"tas": _empty}, prsn=None

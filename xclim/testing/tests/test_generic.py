@@ -32,6 +32,13 @@ class TestThresholdCount:
         np.testing.assert_array_equal(out, [50, 0])
 
 
+class TestDomainCount:
+    def test_simple(self, tas_series):
+        ts = tas_series(np.arange(365))
+        out = generic.domain_count(ts, low=10, high=20, freq="Y")
+        np.testing.assert_array_equal(out, [10, 0])
+
+
 class TestDailyDownsampler:
     def test_std_calendar(self):
 
@@ -130,4 +137,8 @@ def test_doyminmax(q_series):
     dmn = generic.doymin(q)
     assert dmx.values == [40]
     assert dmn.values == [50]
-    assert dmx.units == ""
+    for da in [dmx, dmn]:
+        for attr in ["units", "is_dayofyear", "calendar"]:
+            assert attr in da.attrs.keys()
+        assert da.attrs["units"] == ""
+        assert da.attrs["is_dayofyear"] == 1
