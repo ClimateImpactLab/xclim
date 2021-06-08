@@ -444,7 +444,14 @@ class QuantileDeltaMapping(EmpiricalQuantileMapping):
 class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
     """Analog-Inspired, Quantile-Preserving Downscaling."""
 
-    def __init__(self, **kwargs):
+    @parse_group
+    def __init__(
+        self,
+        *,
+        nquantiles: int = 20,
+        kind: str = ADDITIVE,
+        group: Union[str, Grouper] = "time",
+    ):
         r"""Analog-Inspired, Quantile-Preserving Downscaling.
 
         Adjustment factors are computed between the corresponding days of `ref_coarse` and `ref_fine`.
@@ -462,7 +469,11 @@ class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
           The grouping information. See :py:class:`xclim.sdba.base.Grouper` for details.
 
         """
-        super().__init__(**kwargs)
+        super().__init__(
+            nquantiles=nquantiles,
+            kind=kind,
+            group=group,
+        )
 
     def _train(self, ref_coarse, ref_fine):
 
