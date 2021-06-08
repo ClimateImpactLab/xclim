@@ -13,6 +13,7 @@ from xclim.indices import stats
 
 from ._adjustment import (
     dqm_scale_sim,
+    aiqpd_train,
     dqm_train,
     eqm_train,
     loci_adjust,
@@ -439,6 +440,66 @@ class QuantileDeltaMapping(EmpiricalQuantileMapping):
         ).scen
         return scen
 
+
+class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
+    """Analog-Inspired, Quantile-Preserving Downscaling."""
+
+    def __init__(self, **kwargs):
+        r"""Analog-Inspired, Quantile-Preserving Downscaling.
+
+        Adjustment factors are computed between the corresponding days of `ref_coarse` and `ref_fine`.
+        Quantiles of `sim` are matched to the corresponding quantiles of `AFs` and corrected accordingly.
+
+        Parameters
+        ----------
+        At instantiation:
+
+        nquantiles : int
+          The number of quantiles to use. Two endpoints at 1e-6 and 1 - 1e-6 will be added.
+        kind : {'+', '*'}
+          The adjustment kind, either additive or multiplicative.
+        group : Union[str, Grouper]
+          The grouping information. See :py:class:`xclim.sdba.base.Grouper` for details.
+
+        """
+        super().__init__(**kwargs)
+
+    def _train(self, ref_coarse, ref_fine):
+
+        quantiles = np.array(
+            equally_spaced_nodes(self.nquantiles, eps=1e-6), dtype="float32"
+        )
+
+        ds = aiqpd_train(
+            xr.Dataset({"ref_coarse": ref_coarse, "ref_fine": ref_fine}),
+            group=self.group,
+            quantiles=quantiles,
+            kind=self.kind,
+        )
+  
+        ds.af.attrs.update(
+            standard_name="Adjustment factors",
+            long_name="Analog-Inspired, Quantile Preserving Downscaling Adjustment Factors",
+        )
+        ds.ref_coarse_q.attrs.update(
+            standard_name="Empirical quantiles",
+            long_name="Empirical quantiles of coarse reference data",
+        )
+     
+        return ds
+
+    def _adjust(self, sim):
+
+        # match quantiles from sim to corresponding AFs for that DOY 
+
+        ds = qdm_adjust(
+            xr.Dataset({"sim": sim}),
+            group=self.group,
+            quantiles=quantiles,
+            kind=self.kind,
+        )
+
+        return ds 
 
 class ExtremeValues(BaseAdjustment):
     """Second order adjustment for extreme values."""

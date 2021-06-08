@@ -37,6 +37,33 @@ def dqm_train(ds, *, dim, kind, quantiles):
 
     return xr.Dataset(data_vars=dict(af=af, hist_q=hist_q, scaling=scaling))
 
+@map_groups(
+    af=[Grouper.PROP, "quantiles"],
+    ref_coarse_q=[Grouper.PROP, "quantiles"],
+)
+def aiqpd_train(ds, *, dim, kind, quantiles):
+    """AIQPD: Train step on one group.
+
+    Dataset variables: 
+      ref_coarse : training target, coarse resolution
+      ref_fine : training target, fine resolution
+    """
+    # compute coarse quantiles
+    ref_coarse_q = nbu.quantile(ds.ref_coarse, quantiles, dim)
+
+    # compute indices of days corresponding to each quantile
+    indices = group.apply(u.argsort, ds.ref_coarse) 
+
+    # map indices on ref_coarse and ref_fine
+    ref_coarse_sorted = np.take_along_axis(ds.ref_coarse.name.values, indices.values, axis=axis)
+    ref_fine_sorted = np.take_along_axis(ds.ref_fine.name.values, indices.values, axis=axis)
+    ref_coarse_days = xr.DataArray(ref_coarse_sorted, name="ref_coarse", dims=ds.ref_coarse.dims)
+    ref_fine_days = xr.DataArray(ref_fine_sorted, name="ref_fine", dims=ds.ref_fine.dims)
+
+    # compute adjustment factors as difference bw course and fine for those days
+    af = u.get_correction(ref_coarse_days, ref_fine_days)
+
+    return xr.Dataset(data_vars=dict(af=af, ref_coarse_q=ref_coarse_q)
 
 @map_groups(
     af=[Grouper.PROP, "quantiles"],

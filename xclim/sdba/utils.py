@@ -484,6 +484,26 @@ def rank(da, dim="time", pct=False):
     return da.rank(dim, pct=pct)
 
 
+def argsort(da, axis=0):
+    """Sorts data along a dimension and returns the indices. 
+
+    Replicates `xr.DataArray.argsort` but as a function usable in a Grouper.apply().
+    Xarray's docstring is below:
+
+    Returns the indices that would sort this array. Refer to numpy.argsort for full documentation. 
+
+    Parameters
+    ----------
+    axis : integer
+        Axis over which to sort the data. 
+
+    Returns
+    -------
+    argsorted : DataArray
+        DataArray with the same coordinates and dtype 'float64'.
+    """
+    return da.argsort(axis=axis)
+
 def pc_matrix(arr: Union[np.ndarray, dsk.Array]):
     """Construct a Principal Component matrix.
 
