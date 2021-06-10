@@ -467,7 +467,7 @@ class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
     def _train(self, ref_coarse, ref_fine):
 
         quantiles = np.array(
-            equally_spaced_nodes(self.nquantiles, eps=1e-6), dtype="float32"
+            equally_spaced_nodes(self.nquantiles, eps=None), dtype="float32"
         )
 
         ds = aiqpd_train(

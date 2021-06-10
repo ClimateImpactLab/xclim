@@ -52,24 +52,11 @@ def aiqpd_train(ds, *, dim, kind, quantiles):
     # compute coarse quantiles
     ref_coarse_q = nbu.quantile(ds.ref_coarse, quantiles, dim)
 
-    # compute indices of days corresponding to each quantile
-    #indices = group.apply(u.argsort, ds.ref_coarse) 
-    axis = 0
-    ref_fine_q = nbu.argsort(ds.ref_coarse, ds.ref_fine, quantiles, dim)
-
-    # map indices on ref_coarse and ref_fine
-
-    #ref_coarse_sorted = xr.apply_ufunc(np.take_along_axis, ds.ref_coarse, kwargs={"axis": axis, "indices": indices})
-    #ref_fine_sorted = xr.apply_ufunc(np.take_along_axis, ds.ref_fine, kwargs={"axis": axis, "indices": indices})
-
-    #ref_coarse_sorted = np.take_along_axis(ds.ref_coarse.values, indices, axis=0)
-    #ref_fine_sorted = np.take_along_axis(ds.ref_fine.values, indices, axis=0)
-    #ref_coarse_days = xr.DataArray(ref_coarse_sorted, name="ref_coarse", dims=ds.ref_coarse.dims)
-    #ref_fine_days = xr.DataArray(ref_fine_sorted, name="ref_fine", dims=ds.ref_fine.dims)
+    # compute indices of days corresponding to each quantile for ref coarse 
+    # sort ref fine with those indices (corresponding to # of quantiles)
+    ref_fine_q = nbu.argsort(ds.ref_coarse, ds.ref_fine, quantiles, dim, axis=0)
 
     # compute adjustment factors as difference bw course and fine for those days
-    #af = u.get_correction(ref_coarse_days, ref_fine_days, kind)
-    #af = u.get_correction(ref_coarse_q, ref_fine_sorted.values, kind)
     af = u.get_correction(ref_coarse_q, ref_fine_q, kind)
 
     return xr.Dataset(data_vars=dict(af=af, ref_coarse_q=ref_coarse_q))

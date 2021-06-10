@@ -93,23 +93,25 @@ def quantile(da, q, dim):
     return res
 @jit(
     [
-        float32[:, :](float32[:, :], float32[:]),
-        float64[:, :](float64[:, :], float64[:]),
-        float32[:](float32[:], float32[:]),
-        float64[:](float64[:], float64[:]),
+        float32[:, :](float32[:, :], float32[:, :],float32[:]),
+        float64[:, :](float64[:, :], float64[:, :],float64[:]),
+        float32[:](float32[:], float32[:],float32[:]),
+        float64[:](float64[:], float64[:], float64[:]),
     ],
     nopython=True,
 )
-def _argsort(arr_coarse, arr_fine, q, axis=0):
+def _argsort(arr_coarse, arr_fine, q):
+    axis = 0
     if arr_coarse.ndim == 1:
-        inds = np.empty((q.size,), dtype=arr_coarse.dtype)
-        inds[:] = np.argsort(arr_coarse, axis)
-        out = np.take_along_axis(arr_fine, inds, axis=0)
+        #inds = np.empty((q.size,), dtype=arr_coarse.dtype)
+        inds = np.argsort(arr_coarse)
+        out = arr_fine[inds]
     else:
         out = np.empty((arr_coarse.shape[0], q.size), dtype=arr_coarse.dtype)
         for index in range(out.shape[0]):
-            inds = np.argsort(arr_coarse[index], axis)
-            out[index] = np.take_along_axis(arr_fine[index], inds, axis)
+            inds = np.argsort(arr_coarse[index])
+            #out[index] = np.take_along_axis(arr_fine[index], inds)
+            out[index] = arr_fine[index][inds]
     return out
 
 def argsort(da_ref_coarse, da_ref_fine, q, dim, axis=0):
