@@ -37,8 +37,12 @@ def dqm_train(ds, *, dim, kind, quantiles):
 
     return xr.Dataset(data_vars=dict(af=af, hist_q=hist_q, scaling=scaling))
 
-@map_blocks(reduces=[Grouper.PROP], af=[Grouper.PROP], ref_coarse_q=[Grouper.PROP])
-def aiqpd_train(ds, *, group, kind, quantiles):
+#@map_blocks(reduces=[Grouper.PROP], af=[Grouper.PROP], ref_coarse_q=[Grouper.PROP])
+@map_groups(
+    af=[Grouper.PROP, "quantiles"],
+    ref_coarse_q=[Grouper.PROP, "quantiles"],
+)
+def aiqpd_train(ds, *, dim, kind, quantiles):
     """AIQPD: Train step on one group.
 
     Dataset variables: 
@@ -49,18 +53,27 @@ def aiqpd_train(ds, *, group, kind, quantiles):
     ref_coarse_q = nbu.quantile(ds.ref_coarse, quantiles, dim)
 
     # compute indices of days corresponding to each quantile
-    indices = group.apply(u.argsort, ds.ref_coarse) 
+    #indices = group.apply(u.argsort, ds.ref_coarse) 
+    axis = 0
+    ref_fine_q = nbu.argsort(ds.ref_coarse, ds.ref_fine, quantiles, dim)
 
     # map indices on ref_coarse and ref_fine
-    ref_coarse_sorted = np.take_along_axis(ds.ref_coarse.name.values, indices.values, axis=0)
-    ref_fine_sorted = np.take_along_axis(ds.ref_fine.name.values, indices.values, axis=0)
-    ref_coarse_days = xr.DataArray(ref_coarse_sorted, name="ref_coarse", dims=ds.ref_coarse.dims)
-    ref_fine_days = xr.DataArray(ref_fine_sorted, name="ref_fine", dims=ds.ref_fine.dims)
+
+    #ref_coarse_sorted = xr.apply_ufunc(np.take_along_axis, ds.ref_coarse, kwargs={"axis": axis, "indices": indices})
+    #ref_fine_sorted = xr.apply_ufunc(np.take_along_axis, ds.ref_fine, kwargs={"axis": axis, "indices": indices})
+
+    #ref_coarse_sorted = np.take_along_axis(ds.ref_coarse.values, indices, axis=0)
+    #ref_fine_sorted = np.take_along_axis(ds.ref_fine.values, indices, axis=0)
+    #ref_coarse_days = xr.DataArray(ref_coarse_sorted, name="ref_coarse", dims=ds.ref_coarse.dims)
+    #ref_fine_days = xr.DataArray(ref_fine_sorted, name="ref_fine", dims=ds.ref_fine.dims)
 
     # compute adjustment factors as difference bw course and fine for those days
-    af = u.get_correction(ref_coarse_days, ref_fine_days)
+    #af = u.get_correction(ref_coarse_days, ref_fine_days, kind)
+    #af = u.get_correction(ref_coarse_q, ref_fine_sorted.values, kind)
+    af = u.get_correction(ref_coarse_q, ref_fine_q, kind)
 
     return xr.Dataset(data_vars=dict(af=af, ref_coarse_q=ref_coarse_q))
+    # return xr.Dataset(data_vars=dict(ref_coarse_q=ref_coarse_q))
 
 @map_groups(
     af=[Grouper.PROP, "quantiles"],

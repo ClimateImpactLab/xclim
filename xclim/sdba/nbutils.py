@@ -91,3 +91,67 @@ def quantile(da, q, dim):
         )
 
     return res
+@jit(
+    [
+        float32[:, :](float32[:, :], float32[:]),
+        float64[:, :](float64[:, :], float64[:]),
+        float32[:](float32[:], float32[:]),
+        float64[:](float64[:], float64[:]),
+    ],
+    nopython=True,
+)
+def _argsort(arr_coarse, arr_fine, q, axis=0):
+    if arr_coarse.ndim == 1:
+        inds = np.empty((q.size,), dtype=arr_coarse.dtype)
+        inds[:] = np.argsort(arr_coarse, axis)
+        out = np.take_along_axis(arr_fine, inds, axis=0)
+    else:
+        out = np.empty((arr_coarse.shape[0], q.size), dtype=arr_coarse.dtype)
+        for index in range(out.shape[0]):
+            inds = np.argsort(arr_coarse[index], axis)
+            out[index] = np.take_along_axis(arr_fine[index], inds, axis)
+    return out
+
+def argsort(da_ref_coarse, da_ref_fine, q, dim, axis=0):
+    """Sort ref_fine with the indices used to quantile ref_coarse """
+    # We have two cases :
+    # - When all dims are processed : we stack them and use _quantile1d
+    # - When the quantiles are vectorized over some dims, these are also stacked and then _quantile2D is used.
+    # All this stacking is so we can cover all ND+1D cases with one numba function.
+
+    # Stack the dims and send to the last position
+    # This is in case there are more than one
+    dims = [dim] if isinstance(dim, str) else dim
+    tem = xr.core.utils.get_temp_dimname(da_ref_coarse.dims, "temporal")
+    da_ref_coarse = da_ref_coarse.stack({tem: dims})
+    da_ref_fine = da_ref_fine.stack({tem: dims})
+
+    # So we cut in half the definitions to declare in numba
+    if not hasattr(q, "dtype") or q.dtype != da_ref_coarse.dtype:
+        q = np.array(q, dtype=da_ref_coarse.dtype)
+
+    if len(da_ref_coarse.dims) > 1:
+        # There are some extra dims
+        extra = xr.core.utils.get_temp_dimname(da_ref_coarse.dims, "extra")
+        da_ref_coarse = da_ref_coarse.stack({extra: set(da_ref_coarse.dims) - {tem}})
+        da_ref_fine = da_ref_fine.stack({extra: set(da_ref_fine.dims) - {tem}})
+        da_ref_coarse = da_ref_coarse.transpose(..., tem)
+        da_ref_fine = da_ref_fine.transpose(..., tem)
+
+        res = xr.DataArray(
+            _argsort(da_ref_coarse.values, da_ref_fine.values, q),
+            dims=(extra, "quantiles"),
+            coords={extra: da[extra], "quantiles": q},
+            attrs=da_ref_coarse.attrs,
+        ).unstack(extra)
+
+    else:
+        # All dims are processed
+        res = xr.DataArray(
+            _argsort(da_ref_coarse.values, da_ref_fine.values, q),
+            dims=("quantiles"),
+            coords={"quantiles": q},
+            attrs=da_ref_coarse.attrs,
+        )
+
+    return res
