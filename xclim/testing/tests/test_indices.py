@@ -22,9 +22,9 @@ import pytest
 import xarray as xr
 
 from xclim import indices as xci
-from xclim.core.calendar import percentile_doy
+from xclim.core.calendar import date_range, percentile_doy
 from xclim.core.options import set_options
-from xclim.core.units import ValidationError, convert_units_to
+from xclim.core.units import ValidationError, convert_units_to, units
 from xclim.testing import open_dataset
 
 K2C = 273.15
@@ -203,14 +203,101 @@ class TestCoolingDegreeDays:
         assert cdd == 10
 
 
-def test_corn_heat_units(tasmin_series, tasmax_series):
-    tn = tasmin_series(np.array([-10, 5, 4, 3, 10]) + K2C)
-    tx = tasmax_series(np.array([-5, 9, 10, 16, 20]) + K2C)
+class TestAgroclimaticIndices:
+    def test_corn_heat_units(self, tasmin_series, tasmax_series):
+        tn = tasmin_series(np.array([-10, 5, 4, 3, 10]) + K2C)
+        tx = tasmax_series(np.array([-5, 9, 10, 16, 20]) + K2C)
 
-    out = xci.corn_heat_units(
-        tn, tx, thresh_tasmin="4.44 degC", thresh_tasmax="10 degC"
+        out = xci.corn_heat_units(
+            tn, tx, thresh_tasmin="4.44 degC", thresh_tasmax="10 degC"
+        )
+        np.testing.assert_allclose(out, [0, 0.504, 0, 8.478, 17.454])
+
+    @pytest.mark.parametrize(
+        "method, end_date, deg_days, max_deg_days",
+        [
+            ("gladstones", "11-01", 1127.78, 1926.0),
+            ("icclim", "10-01", 915.0, 1647.0),
+        ],
     )
-    np.testing.assert_allclose(out, [0, 0.504, 0, 8.478, 17.454])
+    def test_bedd(
+        self, tasmin_series, tasmax_series, method, end_date, deg_days, max_deg_days
+    ):
+
+        time_data = date_range(
+            "1992-01-01", "1995-06-01", freq="D", calendar="standard"
+        )
+        tn = xr.DataArray(
+            np.zeros(time_data.size) + 10 + K2C,
+            dims="time",
+            coords={"time": time_data},
+            attrs=dict(units="K"),
+        )
+
+        tx = xr.DataArray(
+            np.zeros(time_data.size) + 20 + K2C,
+            dims="time",
+            coords={"time": time_data},
+            attrs=dict(units="K"),
+        )
+
+        tx_hot = xr.DataArray(
+            np.zeros(time_data.size) + 50 + K2C,
+            dims="time",
+            coords={"time": time_data},
+            attrs=dict(units="K"),
+        )
+
+        lat = np.array([45])
+        high_lat = np.array([48])
+
+        bedd = xci.biologically_effective_degree_days(
+            tasmin=tn, tasmax=tx, lat=lat, method=method, end_date=end_date, freq="YS"
+        )
+        bedd_hot = xci.biologically_effective_degree_days(
+            tasmin=tn,
+            tasmax=tx_hot,
+            lat=lat,
+            method=method,
+            end_date=end_date,
+            freq="YS",
+        )
+        bedd_high_lat = xci.biologically_effective_degree_days(
+            tasmin=tn,
+            tasmax=tx,
+            lat=high_lat,
+            method=method,
+            end_date=end_date,
+            freq="YS",
+        )
+
+        np.testing.assert_allclose(
+            bedd, np.array([deg_days, deg_days, deg_days, np.NaN])
+        )
+        np.testing.assert_array_equal(
+            bedd_hot, [max_deg_days, max_deg_days, max_deg_days, np.NaN]
+        )
+
+        if method == "gladstones":
+            np.testing.assert_array_less(bedd, bedd_high_lat)
+        if method == "icclim":
+            np.testing.assert_array_equal(bedd, bedd_high_lat)
+
+    def test_cool_night_index(self):
+        ds = open_dataset("cmip5/tas_Amon_CanESM2_rcp85_r1i1p1_200701-200712.nc")
+        ds = ds.rename(dict(tas="tasmin"))
+
+        cni = xci.cool_night_index(tasmin=ds.tasmin, lat=ds.lat)
+        tasmin = convert_units_to(ds.tasmin, "degC")
+
+        cni_nh = cni.where(cni.lat >= 0, drop=True)
+        cni_sh = cni.where(cni.lat < 0, drop=True)
+
+        tn_nh = tasmin.where((tasmin.lat >= 0) & (tasmin.time.dt.month == 9), drop=True)
+        tn_sh = tasmin.where((tasmin.lat < 0) & (tasmin.time.dt.month == 3), drop=True)
+
+        np.testing.assert_array_equal(cni_nh, tn_nh)
+        np.testing.assert_array_equal(cni_sh, tn_sh)
 
 
 class TestDailyFreezeThawCycles:
@@ -1546,52 +1633,6 @@ class TestTG:
         np.testing.assert_array_equal(icclim, ind)
 
 
-@pytest.mark.skip("Fire season computation is not the same as GFWED")
-class TestFireWeatherIndex:
-    nc_gfwed = os.path.join("FWI", "GFWED_sample_2017.nc")
-
-    @pytest.mark.parametrize("use_dask", [True, False])
-    def test_fire_weather_indexes(self, use_dask):
-        ds = open_dataset(self.nc_gfwed)
-        if use_dask:
-            ds = ds.chunk({"loc": 1})
-        fwis = xci.fire_weather_indexes(
-            ds.tas.sel(time=slice("2017-03-03", None)),
-            ds.prbc.sel(time=slice("2017-03-03", None)),
-            ds.sfcwind.sel(time=slice("2017-03-03", None)),
-            ds.rh.sel(time=slice("2017-03-03", None)),
-            ds.lat,
-            ffmc0=ds.FFMC.sel(time="2017-03-02"),
-            dmc0=ds.DMC.sel(time="2017-03-02"),
-            dc0=ds.DC.sel(time="2017-03-02"),
-        )
-        for ind, name in zip(fwis, ["DC", "DMC", "FFMC", "ISI", "BUI", "FWI"]):
-            np.testing.assert_allclose(
-                ind.where(ds[name].notnull()).sel(time=slice("2017-06-01", None)),
-                ds[name].sel(time=slice("2017-06-01", None)),
-                rtol=1e-2,
-                atol=1e-2,
-            )
-
-    @pytest.mark.parametrize("use_dask", [True, False])
-    def test_drought_code(self, use_dask):
-        ds = open_dataset(self.nc_gfwed)
-        if use_dask:
-            ds = ds.chunk({"loc": 1})
-        dc = xci.drought_code(
-            ds.tas.sel(time=slice("2017-03-03", None)),
-            ds.prbc.sel(time=slice("2017-03-03", None)),
-            ds.lat,
-            dc0=ds.DC.sel(time="2017-03-02"),
-        )
-        np.testing.assert_allclose(
-            dc.where(ds.DC.notnull()).sel(time=slice("2017-06-01", None)),
-            ds.DC.sel(time=slice("2017-06-01", None)),
-            rtol=1e-2,
-            atol=1e-2,
-        )
-
-
 @pytest.fixture(scope="session")
 def cmip3_day_tas():
     # xr.set_options(enable_cftimeindex=False)
@@ -1655,17 +1696,17 @@ class TestWindConversion:
     "invalid_values,exp0", [("clip", 100), ("mask", np.nan), (None, 151)]
 )
 def test_relative_humidity_dewpoint(
-    tas_series, rh_series, method, invalid_values, exp0
+    tas_series, hurs_series, method, invalid_values, exp0
 ):
     np.testing.assert_allclose(
         xci.relative_humidity(
             tas=tas_series(np.array([-20, -10, -1, 10, 20, 25, 30, 40, 60]) + K2C),
-            dtas=tas_series(np.array([-15, -10, -2, 5, 10, 20, 29, 20, 30]) + K2C),
+            tdps=tas_series(np.array([-15, -10, -2, 5, 10, 20, 29, 20, 30]) + K2C),
             method=method,
             invalid_values=invalid_values,
         ),
         # Expected values obtained by hand calculation
-        rh_series([exp0, 100, 93, 71, 52, 73, 94, 31, 20]),
+        hurs_series([exp0, 100, 93, 71, 52, 73, 94, 31, 20]),
         rtol=0.02,
         atol=1,
     )
@@ -1693,15 +1734,15 @@ def test_saturation_vapor_pressure(tas_series, method, ice_thresh, exp0):
     "invalid_values,exp0", [("clip", 100), ("mask", np.nan), (None, 188)]
 )
 def test_relative_humidity(
-    tas_series, rh_series, huss_series, ps_series, method, invalid_values, exp0
+    tas_series, hurs_series, huss_series, ps_series, method, invalid_values, exp0
 ):
     tas = tas_series(np.array([-10, -10, 10, 20, 35, 50, 75, 95]) + K2C)
     # Expected values obtained with the Sonntag90 method
-    rh_exp = rh_series([exp0, 63.0, 66.0, 34.0, 14.0, 6.0, 1.0, 0.0])
+    hurs_exp = hurs_series([exp0, 63.0, 66.0, 34.0, 14.0, 6.0, 1.0, 0.0])
     ps = ps_series([101325] * 8)
     huss = huss_series([0.003, 0.001] + [0.005] * 7)
 
-    rh = xci.relative_humidity(
+    hurs = xci.relative_humidity(
         tas=tas,
         huss=huss,
         ps=ps,
@@ -1709,7 +1750,7 @@ def test_relative_humidity(
         invalid_values=invalid_values,
         ice_thresh="0 degC",
     )
-    np.testing.assert_allclose(rh, rh_exp, atol=0.5, rtol=0.005)
+    np.testing.assert_allclose(hurs, hurs_exp, atol=0.5, rtol=0.005)
 
 
 @pytest.mark.parametrize("method", ["tetens30", "sonntag90", "goffgratch46", "wmo08"])
@@ -1717,10 +1758,10 @@ def test_relative_humidity(
     "invalid_values,exp0", [("clip", 1.4e-2), ("mask", np.nan), (None, 2.2e-2)]
 )
 def test_specific_humidity(
-    tas_series, rh_series, huss_series, ps_series, method, invalid_values, exp0
+    tas_series, hurs_series, huss_series, ps_series, method, invalid_values, exp0
 ):
     tas = tas_series(np.array([20, -10, 10, 20, 35, 50, 75, 95]) + K2C)
-    rh = rh_series([150, 10, 90, 20, 80, 50, 70, 40, 30])
+    hurs = hurs_series([150, 10, 90, 20, 80, 50, 70, 40, 30])
     ps = ps_series(1000 * np.array([100] * 4 + [101] * 4))
     # Expected values obtained with the Sonntag90 method
     huss_exp = huss_series(
@@ -1729,7 +1770,7 @@ def test_specific_humidity(
 
     huss = xci.specific_humidity(
         tas=tas,
-        rh=rh,
+        hurs=hurs,
         ps=ps,
         method=method,
         invalid_values=invalid_values,
@@ -1859,9 +1900,9 @@ def test_high_precip_low_temp(pr_series, tasmin_series):
     np.testing.assert_array_equal(out, [1])
 
 
-def test_blowing_snow(snd_series, ws_series):
+def test_blowing_snow(snd_series, sfcWind_series):
     snd = snd_series([0, 0.1, 0.2, 0, 0, 0.1, 0.3, 0.5, 0.7, 0])
-    w = ws_series([9, 0, 0, 0, 0, 1, 1, 0, 5, 0])
+    w = sfcWind_series([9, 0, 0, 0, 0, 1, 1, 0, 5, 0])
 
     out = xci.blowing_snow(snd, w, snd_thresh="50 cm", sfcWind_thresh="4 km/h")
     np.testing.assert_array_equal(out, [1])
@@ -1871,3 +1912,133 @@ def test_winter_storm(snd_series):
     snd = snd_series([0, 0.5, 0.2, 0.7, 0, 0.4])
     out = xci.winter_storm(snd, thresh="30 cm")
     np.testing.assert_array_equal(out, [3])
+
+
+def test_humidex(tas_series):
+
+    tas = tas_series([15, 25, 35, 40])
+    tas.attrs["units"] = "C"
+
+    dtas = tas_series([10, 15, 25, 25])
+    dtas.attrs["units"] = "C"
+
+    # expected values from https://en.wikipedia.org/wiki/Humidex
+    expected = np.array([16, 29, 47, 52]) * units.degC
+
+    # Celcius
+    hc = xci.humidex(tas, dtas)
+    np.testing.assert_array_almost_equal(hc, expected, 0)
+
+    # Kelvin
+    hk = xci.humidex(convert_units_to(tas, "K"), dtas)
+    np.testing.assert_array_almost_equal(hk, expected.to("K"), 0)
+
+    # Fahrenheit
+    hf = xci.humidex(convert_units_to(tas, "fahrenheit"), dtas)
+    np.testing.assert_array_almost_equal(hf, expected.to("fahrenheit"), 0)
+
+
+@pytest.mark.parametrize(
+    "op,exp", [("max", 11), ("sum", 21), ("count", 3), ("mean", 7)]
+)
+def test_freezethaw_spell(tasmin_series, tasmax_series, op, exp):
+    tmin = np.ones(365)
+    tmax = np.ones(365)
+
+    tmin[3:5] = -1
+    tmin[10:15] = -1
+    tmin[20:31] = -1
+    tmin[50:55] = -1
+
+    tasmax = tasmax_series(tmax + K2C)
+    tasmin = tasmin_series(tmin + K2C)
+
+    out = xci.multiday_temperature_swing(
+        tasmin=tasmin, tasmax=tasmax, freq="AS-JUL", window=3, op=op
+    )
+    np.testing.assert_array_equal(out, exp)
+
+
+def test_wind_chill(tas_series, sfcWind_series):
+    tas = tas_series(np.array([-1, -10, -20, 10, -15]) + K2C)
+    sfcWind = sfcWind_series([10, 60, 20, 6, 2])
+
+    out = xci.wind_chill_index(tas=tas, sfcWind=sfcWind)
+    # Expected values taken from the online calculator of the ECCC.
+    # The calculator was altered to remove the rounding of the output.
+    np.testing.assert_allclose(
+        out,
+        [-4.509267062481955, -22.619869069856854, -30.478945408950928, np.NaN, -16.443],
+    )
+
+    out = xci.wind_chill_index(tas=tas, sfcWind=sfcWind, method="US")
+    assert out[-1].isnull()
+
+
+class TestPotentialEvapotranspiration:
+    def test_baier_robertson(self, tasmin_series, tasmax_series):
+        tn = tasmin_series(np.array([0, 5, 10]) + 273.15)
+        tn = tn.expand_dims(lat=[45])
+        tx = tasmax_series(np.array([10, 15, 20]) + 273.15)
+        tx = tx.expand_dims(lat=[45])
+
+        out = xci.potential_evapotranspiration(tn, tx, method="BR65")
+        np.testing.assert_allclose(out[0, 2], [3.861079 / 86400], rtol=1e-2)
+
+    def test_hargreaves(self, tasmin_series, tasmax_series, tas_series):
+        tn = tasmin_series(np.array([0, 5, 10]) + 273.15)
+        tn = tn.expand_dims(lat=[45])
+        tx = tasmax_series(np.array([10, 15, 20]) + 273.15)
+        tx = tx.expand_dims(lat=[45])
+        tm = tas_series(np.array([5, 10, 15]) + 273.15)
+        tm = tm.expand_dims(lat=[45])
+
+        out = xci.potential_evapotranspiration(tn, tx, tm, method="HG85")
+        np.testing.assert_allclose(out[2, 0], [3.962589 / 86400], rtol=1e-2)
+
+    def test_thornthwaite(self, tas_series):
+        time_std = date_range(
+            "1990-01-01", "1990-12-01", freq="MS", calendar="standard"
+        )
+        tm = xr.DataArray(
+            np.ones((time_std.size, 1)),
+            dims=("time", "lat"),
+            coords={"time": time_std, "lat": [45]},
+            attrs={"units": "degC"},
+        )
+
+        out = xci.potential_evapotranspiration(tas=tm, method="TW48")
+        np.testing.assert_allclose(out[0, 1], [42.7619242 / (86400 * 30)], rtol=1e-1)
+
+
+def test_water_budget(pr_series, tasmin_series, tasmax_series):
+    pr = pr_series(np.array([10, 10, 10]))
+    pr.attrs["units"] = "mm/day"
+    pr = pr.expand_dims(lat=[45])
+    tn = tasmin_series(np.array([0, 5, 10]) + K2C)
+    tn = tn.expand_dims(lat=[45])
+    tx = tasmax_series(np.array([10, 15, 20]) + K2C)
+    tx = tx.expand_dims(lat=[45])
+
+    out = xci.water_budget(pr, tn, tx, method="BR65")
+    np.testing.assert_allclose(out[0, 2], [6.138921 / 86400], rtol=1e-3)
+
+    out = xci.water_budget(pr, tn, tx, method="HG85")
+    np.testing.assert_allclose(out[0, 2], [6.037411 / 86400], rtol=1e-3)
+
+    time_std = date_range("1990-01-01", "1990-12-01", freq="MS", calendar="standard")
+    tm = xr.DataArray(
+        np.ones((time_std.size, 1)),
+        dims=("time", "lat"),
+        coords={"time": time_std, "lat": [45]},
+        attrs={"units": "degC"},
+    )
+    prm = xr.DataArray(
+        np.ones((time_std.size, 1)) * 10,
+        dims=("time", "lat"),
+        coords={"time": time_std, "lat": [45]},
+        attrs={"units": "mm/day"},
+    )
+
+    out = xci.water_budget(prm, tas=tm, method="TW48")
+    np.testing.assert_allclose(out[1, 0], [8.5746025 / 86400], rtol=1e-1)

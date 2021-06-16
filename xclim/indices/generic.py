@@ -6,15 +6,20 @@ Generic indices submodule
 
 Helper functions for common generic actions done in the computation of indices.
 """
-from typing import Union
+import warnings
+from typing import Optional, Union
 
 import numpy as np
 import xarray as xr
 
-from xclim.core.calendar import get_calendar
-from xclim.core.units import convert_units_to, pint2cfunits, str2pint, to_agg_units
-
-from . import run_length as rl
+from xclim.core.calendar import convert_calendar, doy_to_days_since, get_calendar
+from xclim.core.units import (
+    convert_units_to,
+    declare_units,
+    pint2cfunits,
+    str2pint,
+    to_agg_units,
+)
 
 # __all__ = [
 #     "select_time",
@@ -26,7 +31,8 @@ from . import run_length as rl
 #     "get_daily_events",
 #     "daily_downsampler",
 # ]
-
+from ..core.utils import DayOfYearStr
+from . import run_length as rl
 
 binary_ops = {">": "gt", "<": "lt", ">=": "ge", "<=": "le", "==": "eq", "!=": "ne"}
 
@@ -645,4 +651,131 @@ def extreme_temperature_range(
 
     u = str2pint(low_data.units)
     out.attrs["units"] = pint2cfunits(u - u)
+    return out
+
+
+def aggregate_between_dates(
+    data: xr.DataArray,
+    start: Union[xr.DataArray, DayOfYearStr],
+    end: Union[xr.DataArray, DayOfYearStr],
+    op: str = "sum",
+    freq: Optional[str] = None,
+):
+    """Aggregate the data over a period between start and end dates and apply the operator on the aggregated data.
+
+    Parameters
+    ----------
+    data : xr.DataArray
+      Data to aggregate between start and end dates.
+    start : xr.DataArray or DayOfYearStr
+      Start dates (as day-of-year) for the aggregation periods.
+    end : xr.DataArray or DayOfYearStr
+      End (as day-of-year) dates for the aggregation periods.
+    op : {'min', 'max', 'sum', 'mean', 'std'}
+      Operator.
+    freq : str
+      Resampling frequency.
+
+    Returns
+    -------
+    xarray.DataArray, [dimensionless]
+      Aggregated data between the start and end dates. If the end date is before the start date, returns np.nan.
+      If there is no start and/or end date, returns np.nan.
+    """
+
+    def _get_days(bound, group, base_time):
+        """Get bound in number of days since base_time. Bound can be a days_since array or a DayOfYearStr."""
+        if isinstance(bound, str):
+            b_i = rl.index_of_date(group.time, bound, max_idxs=1)  # noqa
+            if not len(b_i):
+                return None
+            return (group.time.isel(time=b_i[0]) - group.time.isel(time=0)).dt.days
+        if base_time in bound.time:
+            return bound.sel(time=base_time)
+        return None
+
+    if freq is None:
+        freqs = []
+        for i, bound in enumerate([start, end], start=1):
+            try:
+                freqs.append(xr.infer_freq(bound.time))
+            except AttributeError:
+                freqs.append(None)
+
+        good_freq = set(freqs) - {None}
+
+        if len(good_freq) != 1:
+            raise ValueError(
+                "Non-inferrable resampling frequency or inconsistent frequencies. Got start, end = {freqs}. Please consider providing `freq` manually."
+            )
+        freq = good_freq.pop()
+
+    cal = get_calendar(data, dim="time")
+
+    if not isinstance(start, str):
+        start = convert_calendar(start, cal)
+        start.attrs["calendar"] = cal
+        start = doy_to_days_since(start)
+    if not isinstance(end, str):
+        end = convert_calendar(end, cal)
+        end.attrs["calendar"] = cal
+        end = doy_to_days_since(end)
+
+    out = list()
+    for base_time, indexes in data.resample(time=freq).groups.items():
+        # get group slice
+        group = data.isel(time=indexes)
+
+        start_d = _get_days(start, group, base_time)
+        end_d = _get_days(end, group, base_time)
+
+        # convert bounds for this group
+        if start_d is not None and end_d is not None:
+
+            days = (group.time - base_time).dt.days
+            days[days < 0] = np.nan
+
+            masked = group.where((days >= start_d) & (days <= end_d - 1))
+            res = getattr(masked, op)(dim="time", skipna=True)
+            res = xr.where(
+                ((start_d > end_d) | (start_d.isnull()) | (end_d.isnull())), np.nan, res
+            )
+            # Re-add the time dimension with the period's base time.
+            res = res.expand_dims(time=[base_time])
+            out.append(res)
+        else:
+            # Get an array with the good shape, put nans and add the new time.
+            res = (group.isel(time=0) * np.nan).expand_dims(time=[base_time])
+            out.append(res)
+            continue
+
+    out = xr.concat(out, dim="time")
+    return out
+
+
+@declare_units(tas="[temperature]")
+def degree_days(tas: xr.DataArray, thresh: str, condition: str) -> xr.DataArray:
+    """Calculate the degree days below/above the temperature threshold.
+
+    Parameters
+    ----------
+    tas : xr.DataArray
+      Mean daily temperature.
+    thresh : str
+      The temperature threshold.
+    condition : {"<", ">"}
+      Operator.
+
+    Returns
+    -------
+    xarray.DataArray
+    """
+    thresh = convert_units_to(thresh, tas)
+
+    if "<" in condition:
+        out = (thresh - tas).clip(0)
+    elif ">" in condition:
+        out = (tas - thresh).clip(0)
+
+    out = to_agg_units(out, tas, op="delta_prod")
     return out
