@@ -143,7 +143,7 @@ def argsort(da_ref_coarse, da_ref_fine, q, dim, axis=0):
         res = xr.DataArray(
             _argsort(da_ref_coarse.values, da_ref_fine.values, q),
             dims=(extra, "quantiles"),
-            coords={extra: da[extra], "quantiles": q},
+            coords={extra: da_ref_coarse[extra], "quantiles": q},
             attrs=da_ref_coarse.attrs,
         ).unstack(extra)
 
