@@ -476,7 +476,7 @@ class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
             quantiles=quantiles,
             kind=self.kind,
         )
-        '''
+        
         ds.af.attrs.update(
             standard_name="Adjustment factors",
             long_name="Analog-Inspired, Quantile Preserving Downscaling Adjustment Factors",
@@ -485,7 +485,7 @@ class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
             standard_name="Empirical quantiles",
             long_name="Empirical quantiles of coarse reference data",
         )
-        '''
+        
         return ds
 
     def _adjust(self, sim):
