@@ -60,7 +60,6 @@ def aiqpd_train(ds, *, dim, kind, quantiles):
     af = u.get_correction(ref_coarse_q, ref_fine_q, kind)
 
     return xr.Dataset(data_vars=dict(af=af, ref_coarse_q=ref_coarse_q))
-    # return xr.Dataset(data_vars=dict(ref_coarse_q=ref_coarse_q))
 
 @map_groups(
     af=[Grouper.PROP, "quantiles"],
