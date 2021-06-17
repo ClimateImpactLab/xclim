@@ -49,12 +49,12 @@ def aiqpd_train(ds, *, dim, kind, quantiles):
       ref_coarse : training target, coarse resolution
       ref_fine : training target, fine resolution
     """
-    # compute coarse quantiles
-    ref_coarse_q = nbu.quantile(ds.ref_coarse, quantiles, dim)
+    # compute indices of days corresponding to each quantile for ref coarse
+    # sort ref coarse with those indices (corresponding to # of quantiles)
+    ref_coarse_q = nbu.argsort(ds.ref_coarse, ds.ref_fine, quantiles, dim, arr_sort='coarse', axis=0)
 
-    # compute indices of days corresponding to each quantile for ref coarse 
-    # sort ref fine with those indices (corresponding to # of quantiles)
-    ref_fine_q = nbu.argsort(ds.ref_coarse, ds.ref_fine, quantiles, dim, axis=0)
+    # sort ref fine with the same indices 
+    ref_fine_q = nbu.argsort(ds.ref_coarse, ds.ref_fine, quantiles, dim, arr_sort='fine', axis=0)
 
     # compute adjustment factors as difference bw course and fine for those days
     af = u.get_correction(ref_coarse_q, ref_fine_q, kind)

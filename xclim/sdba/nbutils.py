@@ -1,7 +1,7 @@
 """Numba-accelerated utils."""
 import numpy as np
 import xarray as xr
-from numba import float32, float64, guvectorize, jit  # , int32, int64
+from numba import float32, float64, guvectorize, jit, types  # , int32, int64
 
 
 @guvectorize(
@@ -93,32 +93,37 @@ def quantile(da, q, dim):
     return res
 @jit(
     [
-        float32[:, :](float32[:, :], float32[:, :],float32[:]),
-        float64[:, :](float64[:, :], float64[:, :],float64[:]),
-        float32[:](float32[:], float32[:],float32[:]),
-        float64[:](float64[:], float64[:], float64[:]),
+        float32[:, :](float32[:, :], float32[:, :],float32[:],types.unicode_type),
+        float64[:, :](float64[:, :], float64[:, :],float64[:],types.unicode_type),
+        float32[:](float32[:], float32[:],float32[:],types.unicode_type),
+        float64[:](float64[:], float64[:], float64[:],types.unicode_type),
     ],
     nopython=True,
 )
-def _argsort(arr_coarse, arr_fine, q):
+def _argsort(arr_coarse, arr_fine, q, arr_sort='coarse'):
     axis = 0
     if arr_coarse.ndim == 1:
-        #inds = np.empty((q.size,), dtype=arr_coarse.dtype)
         inds = np.argsort(arr_coarse)
-        out = arr_fine[inds]
+        if arr_sort == 'coarse': 
+            out = arr_coarse[inds]
+        elif arr_sort == 'fine': 
+            out = arr_fine[inds]
     else:
         out = np.empty((arr_coarse.shape[0], q.size), dtype=arr_coarse.dtype)
         for index in range(out.shape[0]):
             inds = np.argsort(arr_coarse[index])
-            #out[index] = np.take_along_axis(arr_fine[index], inds)
-            out[index] = arr_fine[index][inds]
+            if arr_sort == 'coarse': 
+                out[index] = arr_coarse[index][inds]
+            elif arr_sort == 'fine':
+                out[index] = arr_fine[index][inds]
     return out
 
-def argsort(da_ref_coarse, da_ref_fine, q, dim, axis=0):
-    """Sort ref_fine with the indices used to quantile ref_coarse """
+def argsort(da_ref_coarse, da_ref_fine, q, dim, arr_sort='coarse', axis=0):
+    """Sort ref_coarse or ref_fine (specified by the arr_sort input arg) 
+    with the indices used to quantile ref_coarse """
     # We have two cases :
-    # - When all dims are processed : we stack them and use _quantile1d
-    # - When the quantiles are vectorized over some dims, these are also stacked and then _quantile2D is used.
+    # - When all dims are processed : we stack them and use _argsort1d
+    # - When the quantiles are vectorized over some dims, these are also stacked and then _argsort2D is used.
     # All this stacking is so we can cover all ND+1D cases with one numba function.
 
     # Stack the dims and send to the last position
@@ -141,7 +146,7 @@ def argsort(da_ref_coarse, da_ref_fine, q, dim, axis=0):
         da_ref_fine = da_ref_fine.transpose(..., tem)
 
         res = xr.DataArray(
-            _argsort(da_ref_coarse.values, da_ref_fine.values, q),
+            _argsort(da_ref_coarse.values, da_ref_fine.values, q, arr_sort),
             dims=(extra, "quantiles"),
             coords={extra: da_ref_coarse[extra], "quantiles": q},
             attrs=da_ref_coarse.attrs,
@@ -150,7 +155,7 @@ def argsort(da_ref_coarse, da_ref_fine, q, dim, axis=0):
     else:
         # All dims are processed
         res = xr.DataArray(
-            _argsort(da_ref_coarse.values, da_ref_fine.values, q),
+            _argsort(da_ref_coarse.values, da_ref_fine.values, q, arr_sort),
             dims=("quantiles"),
             coords={"quantiles": q},
             attrs=da_ref_coarse.attrs,
