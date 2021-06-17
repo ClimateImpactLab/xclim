@@ -474,7 +474,7 @@ class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
         At instantiation:
 
         nquantiles : int
-          The number of quantiles to use. Two endpoints at 1e-6 and 1 - 1e-6 will be added.
+          The number of quantiles to use. Two endpoints at 1e-6 and 1 - 1e-6 will not be added.
         kind : {'+', '*'}
           The adjustment kind, either additive or multiplicative.
         group : Union[str, Grouper]
@@ -507,18 +507,19 @@ class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
         
         return ds
 
-    def _adjust(self, sim):
+    def _adjust(self, sim, sim_q):
 
         # match quantiles from sim to corresponding AFs for that DOY 
 
-        ds = qdm_adjust(
-            xr.Dataset({"sim": sim}),
+        out = qdm_adjust(
+            xr.Dataset({"sim": sim, "af": self.ds.af, "hist_q": sim_q}),
             group=self.group,
-            quantiles=quantiles,
+            interp="nearest", 
+            extrapolation='constant',
             kind=self.kind,
         )
 
-        return ds 
+        return out 
 
 class ExtremeValues(BaseAdjustment):
     """Second order adjustment for extreme values."""
