@@ -507,12 +507,12 @@ class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
         
         return ds
 
-    def _adjust(self, sim, sim_q):
+    def _adjust(self, sim):
 
         # match quantiles from sim to corresponding AFs for that DOY 
 
         out = qdm_adjust(
-            xr.Dataset({"sim": sim, "af": self.ds.af, "hist_q": sim_q}),
+            xr.Dataset({"sim": sim, "af": self.ds.af, "hist_q": self.ds.ref_coarse_q}),
             group=self.group,
             interp="nearest", 
             extrapolation='constant',

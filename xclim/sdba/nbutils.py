@@ -95,6 +95,7 @@ def quantile(da, q, dim):
     [
         float32[:, :](float32[:, :], float32[:, :],float32[:],types.unicode_type),
         float64[:, :](float64[:, :], float64[:, :],float64[:],types.unicode_type),
+        float64[:, :](float64[:, :], float32[:, :],float64[:],types.unicode_type),
         float32[:](float32[:], float32[:],float32[:],types.unicode_type),
         float64[:](float64[:], float64[:], float64[:],types.unicode_type),
     ],
