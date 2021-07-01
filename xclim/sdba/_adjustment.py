@@ -136,6 +136,23 @@ def qdm_adjust(ds, *, group, interp, extrapolation, kind):
     scen = u.apply_correction(ds.sim, af, kind)
     return xr.Dataset(dict(scen=scen, sim_q=sim_q))
 
+@map_blocks(reduces=[Grouper.PROP, "quantiles"], scen=[], sim_q=[])
+def aiqpd_adjust(ds, *, group, interp, extrapolation, kind):
+    """AIQPD: Adjust process on one block.
+
+    Dataset variables:
+      af : Adjustment factors
+      hist_q : Quantiles over the training data
+      sim : Data to adjust.
+    """
+    af, _ = u.extrapolate_qm(ds.af, ds.ref_coarse_q, method=extrapolation)
+
+    sel = {dim: ds.sim_q[dim] for dim in set(af.dims).intersection(set(ds.sim_q.dims))}
+    sel["quantiles"] = ds.sim_q
+    af = u.broadcast(af, ds.sim, group=group, interp=interp, sel=sel)
+
+    scen = u.apply_correction(ds.sim, af, kind)
+    return xr.Dataset(dict(scen=scen, sim_q=ds.sim_q))
 
 @map_blocks(reduces=[Grouper.DIM], af=[Grouper.PROP], hist_thresh=[Grouper.PROP])
 def loci_train(ds, *, group, thresh):

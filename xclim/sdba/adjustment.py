@@ -21,6 +21,7 @@ from ._adjustment import (
     loci_train,
     qdm_adjust,
     qm_adjust,
+    aiqpd_adjust,
     scaling_adjust,
     scaling_train,
 )
@@ -511,8 +512,8 @@ class AnalogQuantilePreservingDownscaling(EmpiricalQuantileMapping):
 
         # match quantiles from sim to corresponding AFs for that DOY 
 
-        out = qdm_adjust(
-            xr.Dataset({"sim": sim, "af": self.ds.af, "hist_q": self.ds.ref_coarse_q}),
+        out = aiqpd_adjust(
+            xr.Dataset({"sim": sim, "af": self.ds.af, "sim_q": sim.sim_q, "ref_coarse_q": self.ds.ref_coarse_q}),
             group=self.group,
             interp="nearest", 
             extrapolation='constant',
